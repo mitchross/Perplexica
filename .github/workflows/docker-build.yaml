@@ -3,6 +3,7 @@ name: Build & Push Docker Images
 on:
   push:
     branches:
+      - main
       - master
   release:
     types: [published]
@@ -25,11 +26,19 @@ jobs:
         with:
           install: true
 
-      - name: Log in to DockerHub
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/perplexica-${{ matrix.service == 'app' && 'frontend' || 'backend' }}
 
       - name: Extract version from release tag
         if: github.event_name == 'release'
@@ -37,37 +46,27 @@ jobs:
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Build and push Docker image for ${{ matrix.service }}
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-        run: |
-          docker buildx create --use
-          if [[ "${{ matrix.service }}" == "backend" ]]; then \
-            DOCKERFILE=backend.dockerfile; \
-            IMAGE_NAME=perplexica-backend; \
-          else \
-            DOCKERFILE=app.dockerfile; \
-            IMAGE_NAME=perplexica-frontend; \
-          fi
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            --cache-from=type=registry,ref=itzcrazykns1337/${IMAGE_NAME}:main \
-            --cache-to=type=inline \
-            -f $DOCKERFILE \
-            -t itzcrazykns1337/${IMAGE_NAME}:main \
-            --push .
+        if: github.ref_name == 'main' || github.ref_name == 'master'
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ${{ matrix.service == 'backend' && 'backend.dockerfile' || 'app.dockerfile' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/perplexica-${{ matrix.service == 'app' && 'frontend' || 'backend' }}:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/perplexica-${{ matrix.service == 'app' && 'frontend' || 'backend' }}:latest
+          cache-to: type=inline
 
-      - name: Build and push release Docker image for ${{ matrix.service }}
+      - name: Build and push release Docker image
         if: github.event_name == 'release'
-        run: |
-          docker buildx create --use
-          if [[ "${{ matrix.service }}" == "backend" ]]; then \
-            DOCKERFILE=backend.dockerfile; \
-            IMAGE_NAME=perplexica-backend; \
-          else \
-            DOCKERFILE=app.dockerfile; \
-            IMAGE_NAME=perplexica-frontend; \
-          fi
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            --cache-from=type=registry,ref=itzcrazykns1337/${IMAGE_NAME}:${{ env.RELEASE_VERSION }} \
-            --cache-to=type=inline \
-            -f $DOCKERFILE \
-            -t itzcrazykns1337/${IMAGE_NAME}:${{ env.RELEASE_VERSION }} \
-            --push .
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ${{ matrix.service == 'backend' && 'backend.dockerfile' || 'app.dockerfile' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/perplexica-${{ matrix.service == 'app' && 'frontend' || 'backend' }}:${{ env.RELEASE_VERSION }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/perplexica-${{ matrix.service == 'app' && 'frontend' || 'backend' }}:${{ env.RELEASE_VERSION }}
+          cache-to: type=inline
